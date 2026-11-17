@@ -1,0 +1,6 @@
+.solution-hero:before{background:linear-gradient(90deg,rgba(7,17,31,.93) 0%,rgba(7,17,31,.76) 39%,rgba(7,17,31,.23) 100%),linear-gradient(0deg,rgba(7,17,31,.48),transparent 55%),url('img/solutions-agent-hero.png') center 42%/cover no-repeat!important}
+.solution-hero h1{word-break:keep-all;text-wrap:balance;line-height:1.12!important}
+@media(max-width:800px){.solution-hero:before{background-position:center,center,62% center!important}}
+.solution-item.case-enter-pending{opacity:0;transform:translateY(24px)}
+.solution-item.case-enter-visible{opacity:1;transform:translateY(0);transition:opacity .65s ease,transform .65s ease,border-color .25s ease,background .25s ease}
+@media(prefers-reduced-motion:reduce){.solution-item.case-enter-pending{opacity:1;transform:none}}

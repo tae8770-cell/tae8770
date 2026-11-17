@@ -1,0 +1,618 @@
+<style>
+  .admin-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(236, 238, 241, .82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    opacity: 1;
+    visibility: visible;
+    transition:
+      opacity .22s ease,
+      visibility .22s ease;
+  }
+
+  .admin-loading-overlay.is-hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .admin-loading-card {
+    width: min(330px, 92vw);
+    padding: 26px 24px 22px;
+    border: 1px solid rgba(18, 20, 24, .10);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow:
+      0 24px 70px rgba(20, 24, 32, .16),
+      0 3px 12px rgba(20, 24, 32, .06);
+    text-align: center;
+  }
+
+  .admin-loading-brand {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 17px;
+    display: grid;
+    place-items: center;
+    border-radius: 13px;
+    background: linear-gradient(145deg, #383c44, #16181c);
+    color: #fff;
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "Apple SD Gothic Neo",
+      "Noto Sans KR",
+      "Malgun Gothic",
+      Arial,
+      sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .admin-loading-spinner {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    margin: 0 auto 17px;
+  }
+
+  .admin-loading-spinner::before,
+  .admin-loading-spinner::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+  }
+
+  .admin-loading-spinner::before {
+    inset: 0;
+    border: 3px solid #e3e5e8;
+  }
+
+  .admin-loading-spinner::after {
+    inset: 0;
+    border: 3px solid transparent;
+    border-top-color: #25282e;
+    border-right-color: #25282e;
+    animation: adminLoadingSpin .85s linear infinite;
+  }
+
+  .admin-loading-title {
+    margin: 0;
+    color: #25282e;
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "Apple SD Gothic Neo",
+      "Noto Sans KR",
+      "Malgun Gothic",
+      Arial,
+      sans-serif;
+    font-size: 14px;
+    font-weight: 750;
+  }
+
+  .admin-loading-message {
+    min-height: 18px;
+    margin: 7px 0 0;
+    color: #737780;
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "Apple SD Gothic Neo",
+      "Noto Sans KR",
+      "Malgun Gothic",
+      Arial,
+      sans-serif;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  .admin-loading-time {
+    margin-top: 10px;
+    color: #a0a4ab;
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "Apple SD Gothic Neo",
+      "Noto Sans KR",
+      "Malgun Gothic",
+      Arial,
+      sans-serif;
+    font-size: 10px;
+  }
+
+  .admin-loading-progress {
+    height: 4px;
+    margin-top: 16px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #eceef1;
+  }
+
+  .admin-loading-progress span {
+    display: block;
+    width: 38%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      #25282e,
+      #747982,
+      #25282e
+    );
+    animation: adminLoadingProgress 1.5s ease-in-out infinite;
+  }
+
+  @keyframes adminLoadingSpin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes adminLoadingProgress {
+    0% {
+      transform: translateX(-120%);
+    }
+
+    50% {
+      transform: translateX(115%);
+    }
+
+    100% {
+      transform: translateX(260%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .admin-loading-spinner::after,
+    .admin-loading-progress span {
+      animation-duration: 2.5s;
+    }
+  }
+</style>
+
+<div
+  id="adminLoadingOverlay"
+  class="admin-loading-overlay"
+  role="status"
+  aria-live="polite"
+  aria-busy="true"
+>
+  <section class="admin-loading-card">
+    <div class="admin-loading-brand">E</div>
+    <div class="admin-loading-spinner" aria-hidden="true"></div>
+
+    <h2 id="adminLoadingTitle" class="admin-loading-title">
+      대시보드 데이터를 불러오고 있습니다
+    </h2>
+
+    <p id="adminLoadingMessage" class="admin-loading-message">
+      지식 현황과 운영 통계를 확인하고 있습니다.
+    </p>
+
+    <div id="adminLoadingTime" class="admin-loading-time">
+      0초 경과
+    </div>
+
+    <div class="admin-loading-progress" aria-hidden="true">
+      <span></span>
+    </div>
+  </section>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  var state = {
+    visible: true,
+    pendingCount: 0,
+    startedAt: Date.now(),
+    timerId: null,
+    messageTimerId: null,
+    failsafeTimerId: null,
+    initialized: false
+  };
+
+  var messages = [
+    '지식 현황과 운영 통계를 확인하고 있습니다.',
+    '최근 대화와 피드백 데이터를 집계하고 있습니다.',
+    '도메인별 지식 현황을 정리하고 있습니다.',
+    '대시보드 화면을 준비하고 있습니다.'
+  ];
+
+  function getOverlay() {
+    return document.getElementById(
+      'adminLoadingOverlay'
+    );
+  }
+
+  function getMessageElement() {
+    return document.getElementById(
+      'adminLoadingMessage'
+    );
+  }
+
+  function getTimeElement() {
+    return document.getElementById(
+      'adminLoadingTime'
+    );
+  }
+
+  function updateElapsedTime() {
+    var element = getTimeElement();
+    if (!element) return;
+
+    var seconds = Math.max(
+      0,
+      Math.floor(
+        (Date.now() - state.startedAt) / 1000
+      )
+    );
+
+    element.textContent =
+      seconds + '초 경과';
+  }
+
+  function startVisualTimers() {
+    stopVisualTimers();
+
+    state.startedAt = Date.now();
+    updateElapsedTime();
+
+    state.timerId = window.setInterval(
+      updateElapsedTime,
+      1000
+    );
+
+    var index = 0;
+
+    state.messageTimerId =
+      window.setInterval(
+        function() {
+          index =
+            (index + 1) %
+            messages.length;
+
+          var message =
+            getMessageElement();
+
+          if (message) {
+            message.textContent =
+              messages[index];
+          }
+        },
+        2600
+      );
+
+    state.failsafeTimerId =
+      window.setTimeout(
+        function() {
+          hideAdminLoading(true);
+        },
+        45000
+      );
+  }
+
+  function stopVisualTimers() {
+    if (state.timerId) {
+      window.clearInterval(
+        state.timerId
+      );
+    }
+
+    if (state.messageTimerId) {
+      window.clearInterval(
+        state.messageTimerId
+      );
+    }
+
+    if (state.failsafeTimerId) {
+      window.clearTimeout(
+        state.failsafeTimerId
+      );
+    }
+
+    state.timerId = null;
+    state.messageTimerId = null;
+    state.failsafeTimerId = null;
+  }
+
+  window.showAdminLoading =
+    function(message) {
+      var overlay = getOverlay();
+      if (!overlay) return;
+
+      if (message) {
+        var messageElement =
+          getMessageElement();
+
+        if (messageElement) {
+          messageElement.textContent =
+            String(message);
+        }
+      }
+
+      overlay.classList.remove(
+        'is-hidden'
+      );
+
+      overlay.setAttribute(
+        'aria-busy',
+        'true'
+      );
+
+      state.visible = true;
+      startVisualTimers();
+    };
+
+  window.hideAdminLoading =
+    function(force) {
+      if (
+        !force &&
+        state.pendingCount > 0
+      ) {
+        return;
+      }
+
+      var overlay = getOverlay();
+      if (!overlay) return;
+
+      overlay.classList.add(
+        'is-hidden'
+      );
+
+      overlay.setAttribute(
+        'aria-busy',
+        'false'
+      );
+
+      state.visible = false;
+      stopVisualTimers();
+    };
+
+  window.beginAdminLoadingRequest =
+    function(message) {
+      state.pendingCount += 1;
+
+      showAdminLoading(
+        message ||
+        '관리자 데이터를 불러오고 있습니다.'
+      );
+    };
+
+  window.endAdminLoadingRequest =
+    function() {
+      state.pendingCount = Math.max(
+        0,
+        state.pendingCount - 1
+      );
+
+      if (state.pendingCount === 0) {
+        window.setTimeout(
+          function() {
+            hideAdminLoading();
+          },
+          120
+        );
+      }
+    };
+
+  function shouldStartLoading(target) {
+    if (
+      !target ||
+      !target.closest
+    ) {
+      return false;
+    }
+
+    var button = target.closest(
+      'button, a, ' +
+      'input[type="button"], ' +
+      'input[type="submit"]'
+    );
+
+    if (!button) return false;
+
+    if (
+      button.closest(
+        '#adminLoadingOverlay'
+      ) ||
+      button.disabled
+    ) {
+      return false;
+    }
+
+    var text = String(
+      button.textContent ||
+      button.value ||
+      button.title ||
+      ''
+    ).trim();
+
+    var idAndClass = [
+      button.id || '',
+      button.className || '',
+      text
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    return /새로고침|조회|검색|실행|저장|갱신|테스트|동기화|재생성|임베딩|매칭|통계|현황|대시보드|refresh|reload|load|search|run|save|sync|test/.test(
+      idAndClass
+    );
+  }
+
+  function attachRequestStartEvents() {
+    document.addEventListener(
+      'click',
+      function(event) {
+        if (
+          shouldStartLoading(
+            event.target
+          )
+        ) {
+          beginAdminLoadingRequest(
+            '요청한 관리자 데이터를 처리하고 있습니다.'
+          );
+
+          window.setTimeout(
+            function() {
+              if (
+                state.pendingCount > 0
+              ) {
+                endAdminLoadingRequest();
+              }
+            },
+            8000
+          );
+        }
+      },
+      true
+    );
+  }
+
+  function hasDashboardData() {
+    var activePanel =
+      document.querySelector(
+        '.admin-panel.active, ' +
+        '#dashboardPanel, ' +
+        '[data-admin-panel="dashboard"]'
+      );
+
+    if (!activePanel) {
+      return false;
+    }
+
+    var meaningfulSelectors = [
+      '.metric-value',
+      '.summary-card',
+      '.stat-card',
+      '.dashboard-card',
+      '.bar-row',
+      'tbody tr'
+    ];
+
+    for (
+      var selectorIndex = 0;
+      selectorIndex <
+      meaningfulSelectors.length;
+      selectorIndex += 1
+    ) {
+      var nodes =
+        activePanel.querySelectorAll(
+          meaningfulSelectors[
+            selectorIndex
+          ]
+        );
+
+      for (
+        var nodeIndex = 0;
+        nodeIndex < nodes.length;
+        nodeIndex += 1
+      ) {
+        var text = String(
+          nodes[nodeIndex]
+            .textContent || ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (
+          text &&
+          text !== '-' &&
+          text !== '데이터가 없습니다.' &&
+          text.indexOf(
+            '불러오는 중'
+          ) === -1
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  function watchDashboardRendering() {
+    var observer =
+      new MutationObserver(
+        function() {
+          if (
+            state.visible &&
+            state.pendingCount === 0 &&
+            hasDashboardData()
+          ) {
+            window.setTimeout(
+              function() {
+                hideAdminLoading();
+              },
+              120
+            );
+          }
+        }
+      );
+
+    observer.observe(
+      document.documentElement,
+      {
+        childList: true,
+        subtree: true,
+        characterData: true
+      }
+    );
+
+    window.setTimeout(
+      function() {
+        if (hasDashboardData()) {
+          hideAdminLoading(true);
+        }
+      },
+      300
+    );
+  }
+
+  function initialize() {
+    if (state.initialized) return;
+
+    state.initialized = true;
+
+    showAdminLoading(
+      '대시보드 데이터를 불러오고 있습니다.'
+    );
+
+    attachRequestStartEvents();
+    watchDashboardRendering();
+
+    window.setTimeout(
+      function() {
+        if (
+          state.visible &&
+          state.pendingCount === 0
+        ) {
+          hideAdminLoading(true);
+        }
+      },
+      12000
+    );
+  }
+
+  if (
+    document.readyState === 'loading'
+  ) {
+    document.addEventListener(
+      'DOMContentLoaded',
+      initialize
+    );
+  } else {
+    initialize();
+  }
+})();
+</script>

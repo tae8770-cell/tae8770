@@ -1,0 +1,676 @@
+<script>
+function adminRun() {
+  var success = function() {}, failure = showAdminError;
+  var proxy = new Proxy({}, {get: function(target, key) {
+    if (key === 'withSuccessHandler') return function(fn) { success = fn; return proxy; };
+    if (key === 'withFailureHandler') return function(fn) { failure = fn; return proxy; };
+    return function() {
+      google.script.run.withSuccessHandler(success).withFailureHandler(failure)
+        .adminDispatch(localStorage.getItem('sellerSessionToken') || '', key, Array.from(arguments));
+    };
+  }});
+  return proxy;
+}
+var currentAdminTab = 'dashboard';
+
+var adminTitles = {
+  dashboard: '대시보드',
+  knowledge: '지식 현황',
+  conversations: '대화 통계',
+  feedback: '피드백 통계',
+  reviews: '설문·개선 의견',
+  access: '접근 및 회원 관리',
+  errors: '오류 통계',
+  model: '모델 설정',
+  prompt: '프롬프트',
+  operations: '운영 도구'
+};
+
+function showTab(id, button) {
+  currentAdminTab = id;
+
+  document.querySelectorAll('.admin-panel').forEach(function(panel) {
+    panel.classList.remove('active');
+  });
+
+  document.querySelectorAll('.nav-item').forEach(function(item) {
+    item.classList.remove('active');
+  });
+
+  document.getElementById(id).classList.add('active');
+  if (button) button.classList.add('active');
+
+  document.getElementById('adminPageTitle').textContent =
+    adminTitles[id] || id;
+
+  refreshCurrentTab();
+}
+
+function refreshCurrentTab() {
+  if (currentAdminTab === 'dashboard') loadDashboardOverview();
+  else if (currentAdminTab === 'knowledge') loadKnowledgeAnalytics();
+  else if (currentAdminTab === 'conversations') loadConversationAnalytics();
+  else if (currentAdminTab === 'feedback') loadFeedbackAnalytics();
+  else if (currentAdminTab === 'reviews') loadReviewAdmin();
+  else if (currentAdminTab === 'access') loadAccessManagement();
+  else if (currentAdminTab === 'errors') loadErrorAnalytics();
+  else if (currentAdminTab === 'model') loadModelSettings();
+  else if (currentAdminTab === 'prompt') loadPromptSettings();
+  else if (currentAdminTab === 'operations') healthCheckFromAdmin();
+}
+
+function getSelectedDays() {
+  return Number(document.getElementById('adminPeriod').value || 30);
+}
+
+function loadDashboardOverview() {
+  adminRun()
+    .withSuccessHandler(function(data) {
+      renderCards('dashboardCards', [
+        card('전체 지식', data.cards.knowledge_total, '등록 데이터'),
+        card('승인 지식', data.cards.knowledge_approved, '운영 검색 대상'),
+        card('활성 임베딩', data.cards.active_embeddings, '검색 가능'),
+        card('이미지 연결률', data.cards.image_connection_rate + '%', '관련 화면'),
+        card('최근 대화', data.cards.chats, data.period_days + '일'),
+        card('평균 응답', formatMilliseconds(data.cards.average_response_ms), '전체 처리시간'),
+        card('긍정 피드백', data.cards.positive_feedback_rate + '%', '도움됨 비율'),
+        card('최근 오류', data.cards.errors, data.period_days + '일')
+      ]);
+
+      renderBarChart('dashboardKnowledgeStatus', data.knowledge_status);
+      renderBarChart('dashboardDomains', data.knowledge_domains);
+      renderBarChart('dashboardChats', data.daily_chats);
+      renderBarChart('dashboardFeedback', data.feedback_distribution);
+      renderBarChart('dashboardSearchModes', data.search_modes);
+      renderOperationList(data.operations);
+    })
+    .withFailureHandler(showAdminError)
+    .getDashboardOverview(getSelectedDays());
+}
+
+function loadKnowledgeAnalytics() {
+  adminRun()
+    .withSuccessHandler(function(data) {
+      renderCards('knowledgeCards', [
+        card('전체', data.cards.total, '지식 수'),
+        card('승인', data.cards.approved, 'APPROVED'),
+        card('검수 대기', data.cards.review, 'REVIEW'),
+        card('제외', data.cards.excluded, 'EXCLUDED'),
+        card('이미지 연결', data.cards.image_connected, '관련 화면'),
+        card('이미지 미연결', data.cards.image_missing, '점검 필요'),
+        card('임베딩 완료', data.cards.embedding_ready, '승인 지식 기준'),
+        card('임베딩 미생성', data.cards.embedding_missing, '생성 필요'),
+        card('ID 중복', data.cards.duplicate_ids, '0건 유지')
+      ]);
+
+      renderBarChart('knowledgeStatus', data.status);
+      renderBarChart('knowledgeMalls', data.malls);
+      renderBarChart('knowledgeDomains', data.domains);
+      renderBarChart('knowledgeSubDomains', data.sub_domains);
+      renderBarChart('knowledgeTypes', data.knowledge_types);
+      renderBarChart('knowledgeSources', data.sources);
+    })
+    .withFailureHandler(showAdminError)
+    .getKnowledgeAnalytics();
+}
+
+function loadConversationAnalytics() {
+  adminRun()
+    .withSuccessHandler(function(data) {
+      renderCards('conversationCards', [
+        card('전체 질문', data.cards.total, data.period_days + '일'),
+        card('오늘 질문', data.cards.today, '오늘'),
+        card('평균 응답', formatMilliseconds(data.cards.avg_response_ms), '전체'),
+        card('평균 검색', formatMilliseconds(data.cards.avg_search_ms), '검색 단계'),
+        card('평균 생성', formatMilliseconds(data.cards.avg_generation_ms), '답변 생성'),
+        card('근거 미검색', data.cards.no_answer, 'top_score 0'),
+        card('대화 세션', data.cards.sessions, '고유 세션')
+      ]);
+
+      renderBarChart('conversationDaily', data.daily);
+      renderBarChart('conversationModes', data.search_modes);
+      renderBarChart('conversationDomains', data.domains);
+      renderBarChart('conversationHourly', data.hourly);
+      renderBarChart('conversationResponse', data.response_buckets);
+    })
+    .withFailureHandler(showAdminError)
+    .getConversationAnalytics(getSelectedDays());
+}
+
+function loadFeedbackAnalytics() {
+  adminRun()
+    .withSuccessHandler(function(data) {
+      renderCards('feedbackCards', [
+        card('전체 피드백', data.cards.total, data.period_days + '일'),
+        card('도움됨', data.cards.good, 'GOOD'),
+        card('부정확함', data.cards.bad, 'BAD'),
+        card('검수요청', data.cards.need_review, 'NEED_REVIEW'),
+        card('긍정 비율', data.cards.positive_rate + '%', '도움됨 비율')
+      ]);
+
+      renderBarChart('feedbackDistribution', data.distribution);
+      renderBarChart('feedbackDaily', data.daily);
+      renderBarChart('feedbackDomains', data.problem_domains);
+      renderSummaryTable(
+        'feedbackProblems',
+        ['일시', '평가', '질문', '도메인', '의견'],
+        data.recent_problems.map(function(row) {
+          return [
+            formatDateTime(row.created_at),
+            row.rating,
+            row.question,
+            row.domain,
+            row.comment
+          ];
+        })
+      );
+    })
+    .withFailureHandler(showAdminError)
+    .getFeedbackAnalytics(getSelectedDays());
+}
+
+function loadErrorAnalytics() {
+  adminRun()
+    .withSuccessHandler(function(data) {
+      renderCards('errorCards', [
+        card('전체 오류', data.cards.total, data.period_days + '일'),
+        card('24시간 오류', data.cards.last_24_hours, '최근 24시간'),
+        card('OpenAI/API', data.cards.openai, 'API 관련'),
+        card('권한', data.cards.permission, '관리자·접근'),
+        card('이미지', data.cards.image, 'Drive·이미지'),
+        card('시트', data.cards.sheet, '컬럼·시트')
+      ]);
+
+      renderBarChart('errorCategories', data.categories);
+      renderBarChart('errorFunctions', data.functions);
+      renderBarChart('errorDaily', data.daily);
+
+      renderSummaryTable(
+        'recentErrors',
+        ['일시', '기능', '유형', '오류 요약'],
+        data.recent.map(function(row) {
+          return [
+            formatDateTime(row.created_at),
+            row.function_name,
+            row.category,
+            row.message
+          ];
+        })
+      );
+    })
+    .withFailureHandler(showAdminError)
+    .getErrorAnalytics(getSelectedDays());
+}
+
+function loadModelSettings() {
+  adminRun()
+    .withSuccessHandler(function(rows) {
+      var html = '';
+
+      rows.forEach(function(row) {
+        html += '<div class="setting-card">';
+        html += '<label for="setting_' + escapeAttr(row.key) + '">';
+        html += escapeHtml(row.key);
+        html += '</label>';
+
+        if (row.type === 'select') {
+          html += '<select id="setting_' + escapeAttr(row.key) + '">';
+          row.options.forEach(function(option) {
+            html +=
+              '<option value="' +
+              escapeAttr(option) +
+              '"' +
+              (String(row.value).toUpperCase() === String(option).toUpperCase()
+                ? ' selected'
+                : '') +
+              '>' +
+              escapeHtml(option) +
+              '</option>';
+          });
+          html += '</select>';
+        } else {
+          html +=
+            '<input id="setting_' +
+            escapeAttr(row.key) +
+            '" type="' +
+            escapeAttr(row.type) +
+            '" value="' +
+            escapeAttr(row.value) +
+            '">';
+        }
+
+        html += '<p>' + escapeHtml(row.description || '') + '</p>';
+        html += '</div>';
+      });
+
+      document.getElementById('modelSettingsForm').innerHTML = html;
+      document.getElementById('modelSettingsMessage').textContent = '';
+    })
+    .withFailureHandler(showAdminError)
+    .getModelSettings();
+}
+
+function saveModelSettingsFromAdmin() {
+  var settings = {};
+
+  document
+    .querySelectorAll('#modelSettingsForm [id^="setting_"]')
+    .forEach(function(element) {
+      settings[element.id.replace('setting_', '')] = element.value;
+    });
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      var message = result.message || '저장되었습니다.';
+
+      if (result.requires_reembedding) {
+        message += ' 임베딩 모델이 변경되어 전체 재임베딩이 필요합니다.';
+      }
+
+      document.getElementById('modelSettingsMessage').textContent = message;
+      loadModelSettings();
+    })
+    .withFailureHandler(showAdminError)
+    .saveModelSettings(settings);
+}
+
+function loadPromptSettings() {
+  adminRun()
+    .withSuccessHandler(function(data) {
+      document.getElementById('promptEditor').value = data.prompt_text || '';
+      document.getElementById('promptEditor').dataset.promptId =
+        data.prompt_id || 'answer_default';
+
+      document.getElementById('promptMeta').innerHTML = [
+        '<span>상태 <b>', escapeHtml(data.status), '</b></span>',
+        '<span>버전 <b>', escapeHtml(data.version), '</b></span>',
+        '<span>수정일 <b>', escapeHtml(formatDateTime(data.updated_at)), '</b></span>'
+      ].join('');
+
+      document.getElementById('promptMessage').textContent = '';
+    })
+    .withFailureHandler(showAdminError)
+    .getActivePromptSettings();
+}
+
+function savePromptFromAdmin() {
+  var editor = document.getElementById('promptEditor');
+  var promptId = editor.dataset.promptId || 'answer_default';
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      document.getElementById('promptMessage').textContent =
+        result.message || '저장되었습니다.';
+      loadPromptSettings();
+    })
+    .withFailureHandler(showAdminError)
+    .saveActivePromptSettings(promptId, editor.value);
+}
+
+function runUpdateImageUrls() {
+  if (!confirm('Drive 이미지와 지식데이터를 자동 매칭할까요?')) return;
+
+  setOperationResult('이미지 매칭 중...');
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      setOperationResult(JSON.stringify(result, null, 2));
+    })
+    .withFailureHandler(showOperationError)
+    .runUpdateImageUrls();
+}
+
+function runEmbedding() {
+  setOperationResult(
+    '신규·변경 지식만 확인하여 임베딩을 생성하고 있습니다...'
+  );
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      if (!result || !result.ok) {
+        setOperationResult(
+          JSON.stringify(
+            result || {
+              ok: false,
+              error: '임베딩 결과를 받지 못했습니다.'
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      var summary = {
+        ok: true,
+        mode: 'INCREMENTAL',
+        totalSearchable: result.totalSearchable || 0,
+        processed: result.processed || 0,
+        remaining: result.remaining || 0,
+        message:
+          Number(result.processed || 0) > 0
+            ? '신규 또는 변경된 지식만 처리했습니다.'
+            : '새로 임베딩할 지식이 없습니다.',
+        results: result.results || []
+      };
+
+      setOperationResult(
+        JSON.stringify(summary, null, 2)
+      );
+    })
+    .withFailureHandler(showOperationError)
+    .runEmbeddingJob(50);
+}
+
+function runRebuildEmbedding() {
+  var warning = [
+    '전체 강제 재임베딩은 기존 ACTIVE 임베딩도 다시 생성합니다.',
+    'OpenAI API 비용과 처리 시간이 추가로 발생할 수 있습니다.',
+    '',
+    '모델을 변경했거나 전체 임베딩을 의도적으로 다시 만들 때만 실행하세요.',
+    '',
+    '계속하려면 확인 창에서 확인을 누르세요.'
+  ].join('\n');
+
+  if (!confirm(warning)) return;
+
+  setOperationResult(
+    '전체 강제 재임베딩 다음 50건을 처리하고 있습니다...'
+  );
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      setOperationResult(
+        JSON.stringify(result, null, 2)
+      );
+    })
+    .withFailureHandler(showOperationError)
+    .runRebuildEmbeddings(
+      50,
+      'FULL_REBUILD'
+    );
+}
+
+function resetRebuildEmbeddingState() {
+  var warning = [
+    '전체 재임베딩 진행 상태를 초기화합니다.',
+    '',
+    '초기화 후 전체 재임베딩 버튼을 누르면',
+    '첫 번째 지식부터 다시 강제 재임베딩됩니다.',
+    '',
+    '정말 초기화할까요?'
+  ].join('\n');
+
+  if (!confirm(warning)) return;
+
+  setOperationResult(
+    '전체 재임베딩 진행 상태를 초기화하고 있습니다...'
+  );
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      setOperationResult(
+        JSON.stringify(result, null, 2)
+      );
+    })
+    .withFailureHandler(showOperationError)
+    .resetRebuildEmbeddingState();
+}
+
+function healthCheckFromAdmin() {
+  setOperationResult('상태 점검 중...');
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      setOperationResult(JSON.stringify(result, null, 2));
+    })
+    .withFailureHandler(showOperationError)
+    .healthCheck();
+}
+
+function runAdminTestQuestion() {
+  var question = document.getElementById('adminTestQuestion').value.trim();
+
+  if (!question) {
+    setOperationResult('테스트 질문을 입력하세요.');
+    return;
+  }
+
+  setOperationResult('RAG 테스트 중...');
+
+  adminRun()
+    .withSuccessHandler(function(result) {
+      setOperationResult(JSON.stringify(result, null, 2));
+    })
+    .withFailureHandler(showOperationError)
+    .adminTestQuestion(question);
+}
+
+function renderCards(elementId, cards) {
+  document.getElementById(elementId).innerHTML =
+    cards.map(function(item) {
+      return [
+        '<div class="metric-card">',
+        '<div class="metric-label">', escapeHtml(item.label), '</div>',
+        '<div class="metric-value">', escapeHtml(item.value), '</div>',
+        '<div class="metric-sub">', escapeHtml(item.sub || ''), '</div>',
+        '</div>'
+      ].join('');
+    }).join('');
+}
+
+function card(label, value, sub) {
+  return {
+    label: label,
+    value: value,
+    sub: sub
+  };
+}
+
+function renderBarChart(elementId, rows) {
+  var element = document.getElementById(elementId);
+
+  if (!rows || !rows.length) {
+    element.innerHTML = '<div class="empty-state">데이터가 없습니다.</div>';
+    return;
+  }
+
+  var maxValue =
+    Math.max.apply(
+      null,
+      rows.map(function(row) {
+        return Number(row.value || 0);
+      })
+    ) || 1;
+
+  element.innerHTML =
+    '<div class="bar-chart">' +
+    rows.map(function(row) {
+      var width = Math.max(
+        2,
+        Math.round((Number(row.value || 0) / maxValue) * 100)
+      );
+
+      return [
+        '<div class="bar-row">',
+        '<div class="bar-label" title="', escapeAttr(row.label), '">',
+        escapeHtml(row.label),
+        '</div>',
+        '<div class="bar-track"><div class="bar-fill" style="width:',
+        width,
+        '%"></div></div>',
+        '<div class="bar-value">', escapeHtml(row.value), '</div>',
+        '</div>'
+      ].join('');
+    }).join('') +
+    '</div>';
+}
+
+function renderOperationList(data) {
+  var labels = {
+    review_pending: '검수 대기',
+    image_missing: '이미지 미연결',
+    embedding_missing: '임베딩 미생성',
+    duplicate_knowledge_ids: '지식 ID 중복',
+    recent_error_count: '최근 오류',
+    negative_feedback_count: '부정확·검수요청'
+  };
+
+  document.getElementById('dashboardOperations').innerHTML =
+    Object.keys(labels).map(function(key) {
+      return [
+        '<div class="operation-item">',
+        '<span>', escapeHtml(labels[key]), '</span>',
+        '<strong>', escapeHtml(data[key] || 0), '</strong>',
+        '</div>'
+      ].join('');
+    }).join('');
+}
+
+function renderSummaryTable(elementId, headers, rows) {
+  var element = document.getElementById(elementId);
+
+  if (!rows || !rows.length) {
+    element.innerHTML = '<div class="empty-state">데이터가 없습니다.</div>';
+    return;
+  }
+
+  var html = '<div class="table-wrap"><table><thead><tr>';
+
+  headers.forEach(function(header) {
+    html += '<th>' + escapeHtml(header) + '</th>';
+  });
+
+  html += '</tr></thead><tbody>';
+
+  rows.forEach(function(row) {
+    html += '<tr>';
+
+    row.forEach(function(value) {
+      html += '<td>' + escapeHtml(value) + '</td>';
+    });
+
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  element.innerHTML = html;
+}
+
+function setOperationResult(text) {
+  document.getElementById('operationResult').textContent = text;
+}
+
+function showOperationError(error) {
+  setOperationResult(formatError(error));
+}
+
+function loadReviewAdmin() {
+  adminRun().withSuccessHandler(function(data) {
+    renderCards('reviewCards', [card('전체',data.cards.total,'건'),card('정보 발견률',data.cards.foundRate+'%','FOUND'),card('업무 도움률',data.cards.helpfulRate+'%','HELPFUL'),card('조치 필요',data.cards.actionRequired,'건'),card('익명',data.cards.anonymous,'건'),card('AI 분석 완료',data.cards.aiCompleted,'건')]);
+    renderBarChart('reviewInformation',data.information);renderBarChart('reviewHelpful',data.helpfulness);renderBarChart('reviewStatus',data.status);
+    renderReviewRows(data.rows);
+  }).withFailureHandler(showAdminError).getReviewAdminData(getSelectedDays());
+}
+
+function renderReviewRows(rows) {
+  var element=document.getElementById('reviewRows'); if(!rows||!rows.length){element.innerHTML='<div class="empty-state">데이터가 없습니다.</div>';return;}
+  var html='<table><thead><tr><th>일시</th><th>정보 결과</th><th>도움 여부</th><th>업무 영역</th><th>처리 상태</th><th>의견</th><th>첨부</th></tr></thead><tbody>';
+  rows.forEach(function(r){html+='<tr><td>'+escapeHtml(formatDateTime(r.submitted_at))+'</td><td>'+escapeHtml(r.information_result)+'</td><td>'+escapeHtml(r.helpfulness)+'</td><td>'+escapeHtml(r.business_domain)+'</td><td>'+escapeHtml(r.status)+'</td><td>'+escapeHtml(r.detail_comment)+'</td><td>'+(r.attachment_url?'<a href="'+escapeAttr(r.attachment_url)+'" target="_blank" rel="noopener noreferrer">파일 열기</a>':'-')+'</td></tr>';});
+  element.innerHTML=html+'</tbody></table>';
+}
+
+function loadAccessManagement() {
+  adminRun().withSuccessHandler(function(data) {
+    document.getElementById('accessSummary').textContent='현재 챗봇 접속: '+(data.mode==='OPEN'?'익명 사용 가능':'회원 로그인 필수')+'\n마스터: '+data.masterEmail;
+    document.getElementById('openAccessButton').disabled=!data.isMaster;
+    document.getElementById('loginAccessButton').disabled=!data.isMaster;
+    document.getElementById('openAccessButton').setAttribute('aria-pressed',String(data.mode==='OPEN'));
+    document.getElementById('loginAccessButton').setAttribute('aria-pressed',String(data.mode==='LOGIN_REQUIRED'));
+    document.getElementById('anonymousFeedbackToggle').disabled=!data.isMaster;
+    document.getElementById('anonymousFeedbackToggle').checked=!!data.anonymousFeedbackEnabled;
+    renderSellerUsers(data.users);
+    renderAdminUsers(data.admins);
+  }).withFailureHandler(showAdminError).getAccessManagementData();
+}
+function renderSellerUsers(rows) {
+  var element=document.getElementById('sellerUsers');
+  if(!rows||!rows.length){element.innerHTML='<div class="empty-state">데이터가 없습니다.</div>';return;}
+  var html='<div class="table-wrap"><table><thead><tr><th>이메일</th><th>업체명</th><th>이름</th><th>상태</th><th>최근 로그인</th><th>관리</th></tr></thead><tbody>';
+  rows.forEach(function(r){var id=escapeAttr(r.user_id);html+='<tr><td>'+escapeHtml(r.email)+'</td><td>'+escapeHtml(r.company_name)+'</td><td>'+escapeHtml(r.user_name)+'</td><td>'+escapeHtml(r.status)+'</td><td>'+escapeHtml(r.last_login_at)+'</td><td><button type="button" onclick="changeSellerStatus(\''+id+'\',\'ACTIVE\')">활성</button><button type="button" onclick="changeSellerStatus(\''+id+'\',\'LOCKED\')">잠금</button><button type="button" onclick="changeSellerStatus(\''+id+'\',\'INACTIVE\')">비활성</button><button type="button" onclick="grantAdmin(\''+id+'\')">관리자 권한 부여</button><button type="button" onclick="revokeAdmin(\''+id+'\')">권한 회수</button></td></tr>';});
+  element.innerHTML=html+'</tbody></table></div>';
+}
+function renderAdminUsers(rows) {
+  renderSummaryTable('adminUsers',['이메일','이름','역할','상태'],rows.map(function(r){return[r.admin_email,r.admin_name,r.role,r.status];}));
+}
+function changeSellerStatus(userId,status){if(!confirm('회원 상태를 '+status+'로 변경하시겠습니까?'))return;adminRun().withSuccessHandler(loadAccessManagement).withFailureHandler(showAdminError).setSellerUserStatus(userId,status);}
+function grantAdmin(userId){if(!confirm('이 회원에게 관리자 권한을 부여하시겠습니까?'))return;adminRun().withSuccessHandler(loadAccessManagement).withFailureHandler(showAdminError).grantSellerAdmin(userId);}
+function revokeAdmin(userId){if(!confirm('이 회원의 관리자 권한을 회수하시겠습니까?'))return;adminRun().withSuccessHandler(loadAccessManagement).withFailureHandler(showAdminError).revokeSellerAdmin(userId);}
+function changeAccessMode(mode){if(!confirm('접속 정책을 '+mode+'(으)로 변경하시겠습니까?'))return;adminRun().withSuccessHandler(loadAccessManagement).withFailureHandler(showAdminError).setUserAccessMode(mode);}
+function changeAnonymousFeedback(enabled){adminRun().withSuccessHandler(loadAccessManagement).withFailureHandler(function(e){loadAccessManagement();showAdminError(e);}).setAnonymousFeedbackEnabled(enabled);}
+function saveNewAdmin(){adminRun().withSuccessHandler(function(){document.getElementById('newAdminEmail').value='';loadAccessManagement();}).withFailureHandler(showAdminError).saveAdminUser({email:document.getElementById('newAdminEmail').value,name:document.getElementById('newAdminName').value,role:document.getElementById('newAdminRole').value,status:'ACTIVE'});}
+
+function showAdminError(error) {
+  if (window.hideAdminLoading) window.hideAdminLoading(true);
+  if (String(error && error.message || error).indexOf('관리자 권한이 없습니다') >= 0) {
+    document.getElementById('adminLoginOverlay').style.display = 'flex';
+    document.getElementById('adminLoginError').textContent = '로그인 상태와 관리자 권한을 확인해 주세요.';
+    return;
+  }
+  alert(formatError(error));
+}
+
+function adminLogin(event) {
+  event.preventDefault();
+  var error = document.getElementById('adminLoginError');
+  error.textContent = '';
+  google.script.run.withSuccessHandler(function(result) {
+    localStorage.setItem('sellerSessionToken', result.token);
+    google.script.run.withSuccessHandler(function(state) {
+      if (!state.isAdmin) { error.textContent = '이 계정에는 관리자 권한이 없습니다. 관리자에게 권한 부여를 요청하세요.'; return; }
+      document.getElementById('adminLoginOverlay').style.display = 'none';
+      document.getElementById('adminLoginPassword').value = '';
+      loadDashboardOverview();
+    }).withFailureHandler(function(e) { error.textContent = e.message || String(e); }).getPublicAccessState(result.token);
+  }).withFailureHandler(function(e) { error.textContent = e.message || String(e); }).loginSeller({
+    email: document.getElementById('adminLoginId').value,
+    password: document.getElementById('adminLoginPassword').value
+  });
+}
+
+function formatError(error) {
+  return '오류: ' + (error && error.message ? error.message : String(error));
+}
+
+function formatMilliseconds(value) {
+  var num = Number(value || 0);
+  return num < 1000 ? num + 'ms' : (num / 1000).toFixed(1) + '초';
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+
+  var date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value || '');
+  }
+
+  return date.toLocaleString('ko-KR');
+}
+
+function escapeHtml(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+loadDashboardOverview();
+</script>

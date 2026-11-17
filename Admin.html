@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  >
+  <meta name="theme-color" content="#eceef1">
+  <?!= include('AdminLoading'); ?>
+  <?!= include('Style'); ?>
+</head>
+
+<body class="admin-page">
+  <div id="adminLoginOverlay" style="display:none;position:fixed;inset:0;z-index:30000;background:rgba(20,24,32,.76);align-items:center;justify-content:center;padding:20px">
+    <form onsubmit="adminLogin(event)" style="background:white;padding:28px;border-radius:16px;width:min(400px,100%);display:grid;gap:12px">
+      <h2>관리자 로그인</h2><p>관리자 권한을 받은 판매자 계정으로 로그인하세요.</p>
+      <input id="adminLoginId" autocomplete="username" placeholder="계정 아이디" required>
+      <input id="adminLoginPassword" type="password" autocomplete="current-password" placeholder="비밀번호" required>
+      <button type="submit">로그인</button><p id="adminLoginError" role="alert"></p>
+      <? if (appUrl) { ?><a href="<?= appUrl ?>">챗봇으로 돌아가기</a><? } ?>
+    </form>
+  </div>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="admin-brand">
+        <div class="brand-mark">E</div>
+        <div>
+          <h1>파트너 지식봇</h1>
+          <p>Admin Console</p>
+        </div>
+      </div>
+
+      <nav class="admin-nav">
+        <button type="button" class="nav-item active" onclick="showTab('dashboard', this)">대시보드</button>
+        <button type="button" class="nav-item" onclick="showTab('knowledge', this)">지식 현황</button>
+        <button type="button" class="nav-item" onclick="showTab('conversations', this)">대화 통계</button>
+        <button type="button" class="nav-item" onclick="showTab('feedback', this)">피드백 통계</button>
+        <button type="button" class="nav-item" onclick="showTab('reviews', this)">설문·개선 의견</button>
+        <button type="button" class="nav-item" onclick="showTab('access', this)">접근 및 회원 관리</button>
+        <button type="button" class="nav-item" onclick="showTab('errors', this)">오류 통계</button>
+        <button type="button" class="nav-item" onclick="showTab('model', this)">모델 설정</button>
+        <button type="button" class="nav-item" onclick="showTab('prompt', this)">프롬프트</button>
+        <button type="button" class="nav-item" onclick="showTab('operations', this)">운영 도구</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <? if (appUrl) { ?>
+          <a class="return-link" href="<?= appUrl ?>">← 챗봇으로 이동</a>
+        <? } ?>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <header class="admin-topbar">
+        <div>
+          <div class="eyebrow">OPERATIONS CONTROL</div>
+          <h2 id="adminPageTitle">대시보드</h2>
+        </div>
+
+        <div class="admin-top-actions">
+          <select id="adminPeriod" onchange="refreshCurrentTab()">
+            <option value="7">최근 7일</option>
+            <option value="30" selected>최근 30일</option>
+            <option value="90">최근 90일</option>
+          </select>
+          <button type="button" class="soft-button" onclick="refreshCurrentTab()">새로고침</button>
+        </div>
+      </header>
+
+      <section id="dashboard" class="admin-panel active">
+        <div id="dashboardCards" class="metric-grid"></div>
+
+        <div class="chart-grid">
+          <div class="chart-card"><h4>지식 상태</h4><div id="dashboardKnowledgeStatus"></div></div>
+          <div class="chart-card"><h4>도메인별 지식</h4><div id="dashboardDomains"></div></div>
+          <div class="chart-card"><h4>최근 대화량</h4><div id="dashboardChats"></div></div>
+          <div class="chart-card"><h4>피드백 분포</h4><div id="dashboardFeedback"></div></div>
+          <div class="chart-card"><h4>검색 방식</h4><div id="dashboardSearchModes"></div></div>
+          <div class="chart-card"><h4>운영 점검</h4><div id="dashboardOperations" class="operation-list"></div></div>
+        </div>
+      </section>
+
+      <section id="knowledge" class="admin-panel">
+        <div id="knowledgeCards" class="metric-grid"></div>
+        <div class="chart-grid">
+          <div class="chart-card"><h4>상태별</h4><div id="knowledgeStatus"></div></div>
+          <div class="chart-card"><h4>몰별</h4><div id="knowledgeMalls"></div></div>
+          <div class="chart-card"><h4>도메인별</h4><div id="knowledgeDomains"></div></div>
+          <div class="chart-card"><h4>서브도메인별</h4><div id="knowledgeSubDomains"></div></div>
+          <div class="chart-card"><h4>지식 유형별</h4><div id="knowledgeTypes"></div></div>
+          <div class="chart-card"><h4>출처별</h4><div id="knowledgeSources"></div></div>
+        </div>
+      </section>
+
+      <section id="conversations" class="admin-panel">
+        <div id="conversationCards" class="metric-grid"></div>
+        <div class="chart-grid">
+          <div class="chart-card"><h4>일별 대화량</h4><div id="conversationDaily"></div></div>
+          <div class="chart-card"><h4>검색 방식</h4><div id="conversationModes"></div></div>
+          <div class="chart-card"><h4>문의 도메인</h4><div id="conversationDomains"></div></div>
+          <div class="chart-card"><h4>시간대별 문의</h4><div id="conversationHourly"></div></div>
+          <div class="chart-card"><h4>응답시간 분포</h4><div id="conversationResponse"></div></div>
+        </div>
+      </section>
+
+      <section id="feedback" class="admin-panel">
+        <div id="feedbackCards" class="metric-grid"></div>
+        <div class="chart-grid">
+          <div class="chart-card"><h4>평가 분포</h4><div id="feedbackDistribution"></div></div>
+          <div class="chart-card"><h4>일별 피드백</h4><div id="feedbackDaily"></div></div>
+          <div class="chart-card"><h4>문제 피드백 도메인</h4><div id="feedbackDomains"></div></div>
+        </div>
+        <div class="summary-table-card">
+          <h4>최근 부정확함·검수요청</h4>
+          <div id="feedbackProblems"></div>
+        </div>
+      </section>
+
+      <section id="errors" class="admin-panel">
+        <div id="errorCards" class="metric-grid"></div>
+        <div class="chart-grid">
+          <div class="chart-card"><h4>오류 유형</h4><div id="errorCategories"></div></div>
+          <div class="chart-card"><h4>함수별 오류</h4><div id="errorFunctions"></div></div>
+          <div class="chart-card"><h4>일별 오류</h4><div id="errorDaily"></div></div>
+        </div>
+        <div class="summary-table-card">
+          <h4>최근 오류</h4>
+          <div id="recentErrors"></div>
+        </div>
+      </section>
+
+      <section id="model" class="admin-panel">
+        <div class="panel-toolbar">
+          <div>
+            <h3>모델 설정</h3>
+            <p>저장하면 캐시가 초기화되고 다음 질문부터 실제 RAG에 적용됩니다.</p>
+          </div>
+          <button type="button" onclick="saveModelSettingsFromAdmin()">전체 설정 저장</button>
+        </div>
+        <div id="modelSettingsForm" class="settings-grid"></div>
+        <div id="modelSettingsMessage" class="inline-message"></div>
+      </section>
+
+      <section id="prompt" class="admin-panel">
+        <div class="panel-toolbar">
+          <div>
+            <h3>답변 프롬프트</h3>
+            <p>저장하면 프롬프트 캐시가 초기화되고 다음 답변부터 적용됩니다.</p>
+          </div>
+          <button type="button" onclick="savePromptFromAdmin()">프롬프트 저장</button>
+        </div>
+
+        <div id="promptMeta" class="prompt-meta"></div>
+        <textarea id="promptEditor" class="prompt-editor" rows="22"></textarea>
+        <div id="promptMessage" class="inline-message"></div>
+      </section>
+
+      <section id="operations" class="admin-panel">
+        <div class="panel-toolbar">
+          <div>
+            <h3>운영 도구</h3>
+            <p>
+              일반적으로는 신규·변경 임베딩만 실행하세요.
+              전체 강제 재임베딩은 모델 변경 등 특별한 경우에만 사용합니다.
+            </p>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button type="button" onclick="runUpdateImageUrls()">
+            이미지 링크 자동 매칭
+          </button>
+
+          <button type="button" onclick="runEmbedding()">
+            신규·변경 임베딩 50건
+          </button>
+
+          <button
+            type="button"
+            class="secondary-button"
+            onclick="runRebuildEmbedding()"
+            title="기존 ACTIVE 임베딩도 다시 생성합니다."
+          >
+            전체 강제 재임베딩 다음 50건
+          </button>
+
+          <button
+            type="button"
+            class="secondary-button"
+            onclick="resetRebuildEmbeddingState()"
+            title="전체 재임베딩을 첫 번째 지식부터 다시 시작할 때만 사용합니다."
+          >
+            전체 재임베딩 진행 초기화
+          </button>
+
+          <button
+            type="button"
+            class="secondary-button"
+            onclick="healthCheckFromAdmin()"
+          >
+            상태 점검
+          </button>
+        </div>
+
+        <div class="admin-test-box">
+          <textarea id="adminTestQuestion" rows="3" placeholder="RAG 테스트 질문"></textarea>
+          <button type="button" onclick="runAdminTestQuestion()">테스트 실행</button>
+        </div>
+
+        <pre id="operationResult"></pre>
+      </section>
+      <section id="reviews" class="admin-panel">
+        <div id="reviewCards" class="metric-grid"></div>
+        <div class="chart-grid"><div class="chart-card"><h4>정보 발견</h4><div id="reviewInformation"></div></div><div class="chart-card"><h4>업무 도움</h4><div id="reviewHelpful"></div></div><div class="chart-card"><h4>처리 상태</h4><div id="reviewStatus"></div></div></div>
+        <div class="summary-table-card"><h4>최근 사용자 피드백</h4><div id="reviewRows"></div></div>
+      </section>
+      <section id="access" class="admin-panel">
+        <div class="panel-toolbar"><div><h3>접근 및 회원 관리</h3><p>관리자는 회원 상태와 관리자 권한을 관리할 수 있습니다.</p></div></div>
+        <div class="action-row"><button id="openAccessButton" type="button" onclick="changeAccessMode('OPEN')">익명 사용 가능</button><button id="loginAccessButton" type="button" onclick="changeAccessMode('LOGIN_REQUIRED')">회원 로그인 필수</button><label class="soft-button"><input id="anonymousFeedbackToggle" type="checkbox" onchange="changeAnonymousFeedback(this.checked)"> 익명 피드백 허용</label></div>
+        <p id="accessPolicyHelp">챗봇 접속 방식과 익명 피드백 허용 여부는 각각 설정합니다. 접속 정책은 마스터 관리자만 변경할 수 있습니다.</p>
+        <pre id="accessSummary"></pre><div class="summary-table-card"><h4>판매자 회원</h4><div id="sellerUsers"></div></div><div class="summary-table-card"><h4>관리자</h4><div id="adminUsers"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <?!= include('AdminScript'); ?>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>판매자 헬프센터</title>
+  <?!= include('Style'); ?>
+</head>
+<body class="chat-page">
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <div class="brand-mark">E</div>
+        <div>
+          <h1>판매자 헬프센터</h1>
+          <p>Commerce Operations Intelligence</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button id="feedbackHeaderButton" class="icon-button feedback-header-button" type="button" onclick="openFeedbackLayer()" title="사용자 피드백">사용자 피드백</button>
+        <button id="accountButton" class="icon-button account-header-button" type="button" onclick="openAccountLayer()" title="로그인" hidden>로그인</button>
+        <a
+          class="icon-button"
+          href="<?= appUrl ?>?page=admin"
+          title="관리자"
+          aria-label="관리자 화면 열기"
+        >⌘</a>
+      </div>
+    </header>
+
+    <section class="chat-panel">
+      <div id="chatMessages" class="chat-messages" aria-live="polite">
+        <section id="welcomeCard" class="welcome-card">
+          <div class="welcome-icon">✦</div>
+          <h2>파트너오피스 업무를 더 쉽고 빠르게</h2>
+<p>
+  판매자 업무에 필요한 상품등록, 상품수정, 주문, 배송, 교환·반품,
+  고객문의 처리 방법을 질문해 주세요.
+  같은 화면에서 이어서 질문하면 앞선 대화 내용을 반영해 안내합니다.
+</p>
+
+<div class="suggestion-grid">
+  <button
+    type="button"
+    onclick="useSuggestion('새 상품을 등록하려면 파트너오피스에서 어떤 메뉴로 들어가야 해?')"
+  >
+    상품 등록 방법
+  </button>
+
+  <button
+    type="button"
+    onclick="useSuggestion('등록한 상품의 판매가와 재고를 수정하려면 어떻게 해?')"
+  >
+    가격·재고 수정
+  </button>
+
+  <button
+    type="button"
+    onclick="useSuggestion('배송준비중인 주문에 송장번호를 등록하려면 어떻게 해?')"
+  >
+    송장 등록 방법
+  </button>
+
+  <button
+    type="button"
+    onclick="useSuggestion('상품 승인요청이 반려되었을 때 무엇을 확인해야 해?')"
+  >
+    상품 승인 반려
+  </button>
+
+  <button
+    type="button"
+    onclick="useSuggestion('고객이 반품을 요청했을 때 파트너오피스에서 어떻게 처리해?')"
+  >
+    반품 처리 방법
+  </button>
+
+  <button
+    type="button"
+    onclick="useSuggestion('고객의 상품문의에 답변하려면 어느 메뉴로 들어가야 해?')"
+  >
+    상품문의 답변
+  </button>
+</div>
+        </section>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea
+            id="questionInput"
+            rows="1"
+            maxlength="3000"
+            placeholder="운영 업무를 질문하세요"
+            aria-label="질문 입력"
+          ></textarea>
+          <button
+            id="sendBtn"
+            class="send-button"
+            type="button"
+            onclick="sendQuestion()"
+            aria-label="질문 전송"
+          >↑</button>
+        </div>
+        <div class="composer-hint">Enter 전송 · Shift+Enter 줄바꿈</div>
+      </div>
+    </section>
+  </main>
+
+  <div id="imageModal" class="image-modal" aria-hidden="true">
+    <div class="image-modal-backdrop" onclick="closeImageModal()"></div>
+
+    <section
+      class="image-modal-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="imageModalTitle"
+    >
+      <header class="image-modal-header">
+        <div>
+          <div class="modal-kicker">RELATED SCREEN</div>
+          <h3 id="imageModalTitle">관련 화면</h3>
+        </div>
+
+        <div class="image-viewer-actions">
+          <button id="imageZoomOut" type="button" title="축소" aria-label="이미지 축소">−</button>
+          <span id="imageZoomLabel">100%</span>
+          <button id="imageZoomIn" type="button" title="확대" aria-label="이미지 확대">＋</button>
+          <button id="imageFitButton" type="button">화면 맞춤</button>
+          <button id="imageActualButton" type="button">원본 크기</button>
+          <button class="modal-close" type="button" onclick="closeImageModal()" aria-label="닫기">×</button>
+        </div>
+      </header>
+
+      <div id="imageViewerViewport" class="image-viewer-viewport">
+        <div id="imageViewerStage" class="image-viewer-stage">
+          <img id="imageModalImage" alt="관련 운영 화면" draggable="false">
+        </div>
+        <div id="imageModalLoading" class="image-loading">이미지를 불러오는 중입니다.</div>
+      </div>
+
+      <footer class="image-modal-footer">
+        <span class="image-viewer-guide">휠 확대·축소 · 드래그 이동 · 더블클릭 전환</span>
+        <a
+          id="imageModalDriveLink"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Drive에서 열기</a>
+      </footer>
+    </section>
+  </div>
+
+  <?!= include('Script'); ?>
+  <?!= include('UserAccess'); ?>
+  <?!= include('FeedbackLayer'); ?>
+</body>
+</html>

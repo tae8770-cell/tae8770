@@ -1,0 +1,18 @@
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert');
+const ctx = { console };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('AdminSession.js', 'utf8'), ctx);
+const names = ['getDashboardOverview','getKnowledgeAnalytics','getConversationAnalytics','getFeedbackAnalytics','getErrorAnalytics','getModelSettings','saveModelSettings','getActivePromptSettings','saveActivePromptSettings','runUpdateImageUrls','runEmbeddingJob','runRebuildEmbeddings','resetRebuildEmbeddingState','healthCheck','adminTestQuestion','getReviewAdminData','getAccessManagementData','setSellerUserStatus','setUserAccessMode','setAnonymousFeedbackEnabled','saveAdminUser','grantSellerAdmin','revokeSellerAdmin'];
+names.forEach(name => ctx[name] = () => ctx.ADMIN_SESSION_PRINCIPAL_ && ctx.ADMIN_SESSION_PRINCIPAL_.name);
+ctx.validateUserSession_ = token => token === 'valid' ? { user: { user_id: 'u1', user_name: 'seller' } } : null;
+ctx.findAdminForSeller_ = user => user.user_id === 'u1' ? { role: 'ADMIN' } : null;
+ctx.isMasterAdmin_ = () => false;
+assert.throws(() => ctx.adminDispatch('', 'getDashboardOverview', []), /관리자 권한/);
+assert.throws(() => ctx.adminDispatch('valid', 'unknown', []), /지원하지/);
+assert.equal(ctx.adminDispatch('valid', 'getDashboardOverview', []), 'seller');
+assert.equal(ctx.ADMIN_SESSION_PRINCIPAL_, null);
+ctx.findAdminForSeller_ = () => null;
+assert.throws(() => ctx.adminDispatch('valid', 'getDashboardOverview', []), /관리자 권한/);
+console.log('admin session authorization tests passed');

@@ -1,0 +1,833 @@
+<script>
+var PAGE_SESSION_ID =
+  'PAGE_' +
+  Date.now().toString(36) +
+  '_' +
+  Math.random().toString(36).slice(2, 10);
+
+var PAGE_CONVERSATION_HISTORY = [];
+
+var loadingState = {
+  row: null,
+  intervalId: null,
+  timerId: null,
+  startedAt: 0,
+  index: 0
+};
+
+var cushionMessages = [
+  '질문의 의도를 정리하고 있습니다.',
+  '이전 대화의 대상과 조건을 확인하고 있습니다.',
+  '관련 지식과 처리 방법을 검색하고 있습니다.',
+  '답변을 실무에 맞게 정리하고 있습니다.'
+];
+
+var IMAGE_VIEWER_STATE = {
+  scale: 1,
+  minScale: 0.2,
+  maxScale: 5,
+  fitScale: 1,
+  x: 0,
+  y: 0,
+  dragging: false,
+  startX: 0,
+  startY: 0,
+  originX: 0,
+  originY: 0
+};
+
+function sendQuestion() {
+  var input = document.getElementById('questionInput');
+  var question = String(input.value || '').trim();
+
+  if (!question) return;
+
+  hideWelcome();
+  appendUserMessage(question);
+
+  input.value = '';
+  resizeComposer();
+  setComposerDisabled(true);
+  showLoading();
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      hideLoading();
+      setComposerDisabled(false);
+
+      if (!response || !response.ok) {
+        appendErrorMessage(
+          response && response.answer
+            ? response.answer
+            : '오류가 발생했습니다.'
+        );
+        input.focus();
+        return;
+      }
+
+      appendBotAnswer(response);
+
+      PAGE_CONVERSATION_HISTORY.push({
+        question: question,
+        answer:
+          response.answer ||
+          sectionsToClientText(response.sections)
+      });
+
+      if (PAGE_CONVERSATION_HISTORY.length > 8) {
+        PAGE_CONVERSATION_HISTORY =
+          PAGE_CONVERSATION_HISTORY.slice(-8);
+      }
+
+      input.focus();
+    })
+    .withFailureHandler(function() {
+      hideLoading();
+      setComposerDisabled(false);
+      appendErrorMessage(
+        '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+      );
+      input.focus();
+    })
+    .askRagBot(
+      question,
+      PAGE_SESSION_ID,
+      PAGE_CONVERSATION_HISTORY,
+      window.SELLER_SESSION_TOKEN || ''
+    );
+}
+
+function sectionsToClientText(sections) {
+  if (!sections) return '';
+
+  var parts = [];
+
+  if (hasText(sections.summary)) {
+    parts.push('요약: ' + sections.summary);
+  }
+
+  if (hasText(sections.detail)) {
+    parts.push('상세 답변: ' + sections.detail);
+  }
+
+  if (Array.isArray(sections.steps) && sections.steps.length) {
+    parts.push('처리 순서: ' + sections.steps.join(' / '));
+  }
+
+  if (hasText(sections.caution)) {
+    parts.push('주의사항: ' + sections.caution);
+  }
+
+  return parts.join('\n');
+}
+
+function appendUserMessage(text) {
+  var wrap = document.getElementById('chatMessages');
+  var row = document.createElement('div');
+  var bubble = document.createElement('div');
+
+  row.className = 'message-row user';
+  bubble.className = 'user-bubble';
+  bubble.textContent = text;
+
+  row.appendChild(bubble);
+  wrap.appendChild(row);
+  scrollChatToBottom();
+}
+
+function appendBotAnswer(response) {
+  var wrap = document.getElementById('chatMessages');
+  var row = document.createElement('div');
+  var card = document.createElement('div');
+  var sections = response.sections || fallbackSections(response.answer);
+  var sectionCount = 0;
+
+  row.className = 'message-row bot';
+  card.className = 'bot-card';
+
+  if (hasText(sections.summary)) {
+    card.appendChild(
+      buildTextSection('요약', sections.summary, 'answer-summary')
+    );
+    sectionCount += 1;
+  }
+
+  if (hasText(sections.detail)) {
+    card.appendChild(
+      buildTextSection('상세 답변', sections.detail, 'answer-detail')
+    );
+    sectionCount += 1;
+  }
+
+  if (Array.isArray(sections.steps) && sections.steps.length) {
+    card.appendChild(buildStepsSection(sections.steps));
+    sectionCount += 1;
+  }
+
+  if (hasText(sections.caution)) {
+    card.appendChild(
+      buildTextSection('주의사항', sections.caution, 'answer-caution')
+    );
+    sectionCount += 1;
+  }
+
+  if (sectionCount === 0 && hasText(response.answer)) {
+    card.appendChild(
+      buildTextSection('', response.answer, 'answer-detail')
+    );
+  }
+
+  if (Array.isArray(response.sources) && response.sources.length) {
+    var referenceBox = buildReferenceBox(response.sources);
+    if (referenceBox) card.appendChild(referenceBox);
+  }
+
+  card.appendChild(buildFeedbackRow(response.log_id || ''));
+
+  if (response.timing) {
+    var meta = document.createElement('div');
+    meta.className = 'response-meta';
+    meta.textContent = formatTiming(response.timing);
+    card.appendChild(meta);
+  }
+
+  row.appendChild(card);
+  wrap.appendChild(row);
+  scrollChatToBottom();
+}
+
+function buildTextSection(label, text, className) {
+  var section = document.createElement('section');
+  var content = document.createElement('div');
+
+  section.className = 'answer-section';
+
+  if (hasText(label)) {
+    var title = document.createElement('div');
+    title.className = 'answer-label';
+    title.textContent = label;
+    section.appendChild(title);
+  }
+
+  content.className = className;
+  content.textContent = text || '';
+  section.appendChild(content);
+
+  return section;
+}
+
+function buildStepsSection(steps) {
+  var section = document.createElement('section');
+  var title = document.createElement('div');
+  var list = document.createElement('ol');
+
+  section.className = 'answer-section';
+  title.className = 'answer-label';
+  title.textContent = '처리 순서';
+  list.className = 'step-list';
+
+  steps.forEach(function(step) {
+    if (!hasText(step)) return;
+    var item = document.createElement('li');
+    item.textContent = step;
+    list.appendChild(item);
+  });
+
+  if (!list.children.length) return document.createDocumentFragment();
+
+  section.appendChild(title);
+  section.appendChild(list);
+  return section;
+}
+
+function buildReferenceBox(sources) {
+  var visibleSources = (sources || [])
+    .filter(function(source) {
+      return (
+        hasText(source.title) ||
+        hasText(source.source_label) ||
+        isSafeHttpsUrl(source.image_url) ||
+        isSafeHttpsUrl(source.image_preview_url)
+      );
+    })
+    .slice(0, 3);
+
+  if (!visibleSources.length) return null;
+
+  var box = document.createElement('section');
+  var title = document.createElement('div');
+  var list = document.createElement('div');
+
+  box.className = 'reference-box';
+  title.className = 'reference-title';
+  title.textContent = '참고 자료';
+  list.className = 'reference-list';
+
+  visibleSources.forEach(function(source) {
+    var item = document.createElement('div');
+    var name = document.createElement('div');
+    var strong = document.createElement('strong');
+
+    item.className = 'reference-item';
+    name.className = 'reference-name';
+    strong.textContent = source.title || '참고 자료';
+    name.appendChild(strong);
+
+    if (hasText(source.source_label)) {
+      var sourceMeta = document.createElement('span');
+      sourceMeta.textContent = source.source_label;
+      name.appendChild(sourceMeta);
+    }
+
+    item.appendChild(name);
+
+    var previewUrl = isSafeHttpsUrl(source.image_preview_url)
+      ? source.image_preview_url
+      : source.image_url;
+
+    var driveUrl = isSafeHttpsUrl(source.image_url)
+      ? source.image_url
+      : previewUrl;
+
+    if (isSafeHttpsUrl(previewUrl) || isSafeHttpsUrl(driveUrl)) {
+      var actions = document.createElement('div');
+      var button = document.createElement('button');
+
+      actions.className = 'reference-actions';
+      button.type = 'button';
+      button.className = 'image-open-button';
+      button.textContent = '관련 화면 보기';
+      button.addEventListener('click', function() {
+        openImageModal(previewUrl, driveUrl, source.title || '관련 화면');
+      });
+
+      actions.appendChild(button);
+      item.appendChild(actions);
+    }
+
+    list.appendChild(item);
+  });
+
+  box.appendChild(title);
+  box.appendChild(list);
+  return box;
+}
+
+function buildFeedbackRow(logId) {
+  var row = document.createElement('div');
+  row.className = 'feedback-row';
+
+  [
+    { rating: 'GOOD', label: '도움됨' },
+    { rating: 'BAD', label: '부정확함' },
+    { rating: 'NEED_REVIEW', label: '검수요청' }
+  ].forEach(function(item) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'feedback-button';
+    button.textContent = item.label;
+    button.disabled = !logId;
+    button.addEventListener('click', function() {
+      sendFeedback(logId, item.rating, row);
+    });
+    row.appendChild(button);
+  });
+
+  return row;
+}
+
+function sendFeedback(logId, rating, feedbackRow) {
+  if (!logId) return;
+
+  setFeedbackDisabled(feedbackRow, true);
+
+  google.script.run
+    .withSuccessHandler(function() {
+      feedbackRow.innerHTML = '';
+      var complete = document.createElement('span');
+      complete.className = 'feedback-complete';
+      complete.textContent = '피드백이 저장되었습니다.';
+      feedbackRow.appendChild(complete);
+      if (rating !== 'GOOD') {
+        var detailButton = document.createElement('button');
+        detailButton.type = 'button';
+        detailButton.textContent = '상세 의견 남기기';
+        detailButton.onclick = function() {
+          openFeedbackLayer({ entryPoint: 'ANSWER_FEEDBACK', relatedLogId: logId });
+          showFeedbackDetails();
+        };
+        feedbackRow.appendChild(detailButton);
+      }
+    })
+    .withFailureHandler(function() {
+      setFeedbackDisabled(feedbackRow, false);
+      alert('피드백 저장 중 오류가 발생했습니다.');
+    })
+    .saveFeedback({
+      log_id: logId,
+      rating: rating,
+      comment: '',
+      session_id: PAGE_SESSION_ID,
+      session_token: window.SELLER_SESSION_TOKEN || ''
+    });
+}
+
+function setFeedbackDisabled(row, disabled) {
+  Array.prototype.forEach.call(
+    row.querySelectorAll('button'),
+    function(button) {
+      button.disabled = disabled;
+    }
+  );
+}
+
+function showLoading() {
+  hideLoading();
+  hideWelcome();
+
+  var wrap = document.getElementById('chatMessages');
+  var row = document.createElement('div');
+  var card = document.createElement('div');
+  var orbit = document.createElement('div');
+  var textWrap = document.createElement('div');
+  var message = document.createElement('div');
+  var sub = document.createElement('div');
+
+  row.className = 'message-row bot';
+  card.className = 'loading-card';
+  orbit.className = 'loading-orbit';
+  message.className = 'loading-message';
+  sub.className = 'loading-sub';
+
+  loadingState.startedAt = Date.now();
+  loadingState.index = 0;
+  message.textContent = cushionMessages[0];
+  sub.textContent = '0초 경과';
+
+  textWrap.appendChild(message);
+  textWrap.appendChild(sub);
+  card.appendChild(orbit);
+  card.appendChild(textWrap);
+  row.appendChild(card);
+  wrap.appendChild(row);
+
+  loadingState.row = row;
+  loadingState.intervalId = window.setInterval(function() {
+    loadingState.index =
+      (loadingState.index + 1) % cushionMessages.length;
+    message.textContent = cushionMessages[loadingState.index];
+  }, 2400);
+
+  loadingState.timerId = window.setInterval(function() {
+    sub.textContent =
+      Math.floor((Date.now() - loadingState.startedAt) / 1000) +
+      '초 경과';
+  }, 1000);
+
+  scrollChatToBottom();
+}
+
+function hideLoading() {
+  if (loadingState.intervalId) clearInterval(loadingState.intervalId);
+  if (loadingState.timerId) clearInterval(loadingState.timerId);
+  if (loadingState.row && loadingState.row.parentNode) {
+    loadingState.row.parentNode.removeChild(loadingState.row);
+  }
+
+  loadingState.row = null;
+  loadingState.intervalId = null;
+  loadingState.timerId = null;
+}
+
+function appendErrorMessage(message) {
+  appendBotAnswer({
+    ok: false,
+    answer: message,
+    sections: {
+      summary: '',
+      detail: message,
+      steps: [],
+      caution: ''
+    },
+    sources: []
+  });
+}
+
+function fallbackSections(answer) {
+  return {
+    summary: '',
+    detail: String(answer || ''),
+    steps: [],
+    caution: ''
+  };
+}
+
+function formatTiming(timing) {
+  if (!timing) return '';
+  var seconds = Number(timing.total_ms || 0) / 1000;
+  var searchMode = timing.search_mode ? ' · ' + timing.search_mode : '';
+  return seconds.toFixed(1) + '초' + searchMode;
+}
+
+function openImageModal(previewUrl, driveUrl, title) {
+  var modal = document.getElementById('imageModal');
+  var image = document.getElementById('imageModalImage');
+  var loading = document.getElementById('imageModalLoading');
+  var modalTitle = document.getElementById('imageModalTitle');
+  var driveLink = document.getElementById('imageModalDriveLink');
+
+  if (!modal || !image || !isSafeHttpsUrl(previewUrl)) return;
+
+  resetImageViewer();
+  image.style.display = 'none';
+  image.removeAttribute('src');
+  loading.style.display = 'block';
+  modalTitle.textContent = title || '관련 화면';
+  driveLink.href = isSafeHttpsUrl(driveUrl) ? driveUrl : previewUrl;
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('modal-open');
+
+image.onload = function() {
+  image.style.display = 'block';
+
+  if (loading) {
+    loading.style.display = 'none';
+  }
+
+  /*
+   * 모달 레이아웃 계산이 끝난 다음
+   * 이미지 맞춤값을 계산합니다.
+   */
+  window.requestAnimationFrame(
+    function() {
+      window.requestAnimationFrame(
+        function() {
+          fitImageToViewport();
+        }
+      );
+    }
+  );
+};
+
+  image.onerror = function() {
+    loading.textContent = '이미지를 불러오지 못했습니다. Drive에서 열기를 이용해 주세요.';
+  };
+
+  image.src = previewUrl;
+}
+
+function closeImageModal() {
+  var modal = document.getElementById('imageModal');
+  var image = document.getElementById('imageModalImage');
+
+  if (!modal) return;
+
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('modal-open');
+
+  if (image) {
+    image.removeAttribute('src');
+    image.style.display = 'none';
+  }
+
+  resetImageViewer();
+}
+
+function initializeZoomableImageViewer() {
+  var viewport = document.getElementById('imageViewerViewport');
+  var zoomIn = document.getElementById('imageZoomIn');
+  var zoomOut = document.getElementById('imageZoomOut');
+  var fitButton = document.getElementById('imageFitButton');
+  var actualButton = document.getElementById('imageActualButton');
+
+  if (!viewport) return;
+
+  zoomIn.addEventListener('click', function() {
+    setImageViewerScale(IMAGE_VIEWER_STATE.scale * 1.2);
+  });
+
+  zoomOut.addEventListener('click', function() {
+    setImageViewerScale(IMAGE_VIEWER_STATE.scale / 1.2);
+  });
+
+  fitButton.addEventListener('click', fitImageToViewport);
+  actualButton.addEventListener('click', showImageActualSize);
+
+  viewport.addEventListener('wheel', function(event) {
+    event.preventDefault();
+    zoomImageAtPoint(
+      event.deltaY < 0 ? 1.12 : 1 / 1.12,
+      event.clientX,
+      event.clientY
+    );
+  }, { passive: false });
+
+  viewport.addEventListener('pointerdown', function(event) {
+    if (event.button !== 0) return;
+
+    IMAGE_VIEWER_STATE.dragging = true;
+    IMAGE_VIEWER_STATE.startX = event.clientX;
+    IMAGE_VIEWER_STATE.startY = event.clientY;
+    IMAGE_VIEWER_STATE.originX = IMAGE_VIEWER_STATE.x;
+    IMAGE_VIEWER_STATE.originY = IMAGE_VIEWER_STATE.y;
+
+    viewport.classList.add('dragging');
+    viewport.setPointerCapture(event.pointerId);
+  });
+
+  viewport.addEventListener('pointermove', function(event) {
+    if (!IMAGE_VIEWER_STATE.dragging) return;
+
+    IMAGE_VIEWER_STATE.x =
+      IMAGE_VIEWER_STATE.originX +
+      event.clientX -
+      IMAGE_VIEWER_STATE.startX;
+
+    IMAGE_VIEWER_STATE.y =
+      IMAGE_VIEWER_STATE.originY +
+      event.clientY -
+      IMAGE_VIEWER_STATE.startY;
+
+    applyImageViewerTransform();
+  });
+
+  function endDrag(event) {
+    IMAGE_VIEWER_STATE.dragging = false;
+    viewport.classList.remove('dragging');
+    try {
+      viewport.releasePointerCapture(event.pointerId);
+    } catch (ignore) {}
+  }
+
+  viewport.addEventListener('pointerup', endDrag);
+  viewport.addEventListener('pointercancel', endDrag);
+
+  viewport.addEventListener('dblclick', function() {
+    if (
+      Math.abs(
+        IMAGE_VIEWER_STATE.scale - IMAGE_VIEWER_STATE.fitScale
+      ) < 0.02
+    ) {
+      showImageActualSize();
+    } else {
+      fitImageToViewport();
+    }
+  });
+}
+
+function resetImageViewer() {
+  IMAGE_VIEWER_STATE.scale = 1;
+  IMAGE_VIEWER_STATE.fitScale = 1;
+  IMAGE_VIEWER_STATE.x = 0;
+  IMAGE_VIEWER_STATE.y = 0;
+  IMAGE_VIEWER_STATE.dragging = false;
+  applyImageViewerTransform();
+}
+
+function fitImageToViewport() {
+  var viewport =
+    document.getElementById(
+      'imageViewerViewport'
+    );
+
+  var image =
+    document.getElementById(
+      'imageModalImage'
+    );
+
+  if (
+    !viewport ||
+    !image ||
+    !image.naturalWidth ||
+    !image.naturalHeight
+  ) {
+    return;
+  }
+
+  var viewportWidth =
+    Math.max(
+      viewport.clientWidth - 40,
+      100
+    );
+
+  var viewportHeight =
+    Math.max(
+      viewport.clientHeight - 40,
+      100
+    );
+
+  var widthScale =
+    viewportWidth /
+    image.naturalWidth;
+
+  var heightScale =
+    viewportHeight /
+    image.naturalHeight;
+
+  var fitScale =
+    Math.min(
+      widthScale,
+      heightScale,
+      1
+    );
+
+  IMAGE_VIEWER_STATE.fitScale =
+    Math.max(
+      IMAGE_VIEWER_STATE.minScale,
+      Math.min(
+        fitScale,
+        IMAGE_VIEWER_STATE.maxScale
+      )
+    );
+
+  IMAGE_VIEWER_STATE.scale =
+    IMAGE_VIEWER_STATE.fitScale;
+
+  /* 화면 맞춤 시 이동값을 반드시 초기화 */
+  IMAGE_VIEWER_STATE.x = 0;
+  IMAGE_VIEWER_STATE.y = 0;
+
+  applyImageViewerTransform();
+}
+
+function showImageActualSize() {
+  IMAGE_VIEWER_STATE.scale = 1;
+  IMAGE_VIEWER_STATE.x = 0;
+  IMAGE_VIEWER_STATE.y = 0;
+  applyImageViewerTransform();
+}
+
+function setImageViewerScale(nextScale) {
+  IMAGE_VIEWER_STATE.scale = Math.max(
+    IMAGE_VIEWER_STATE.minScale,
+    Math.min(Number(nextScale) || 1, IMAGE_VIEWER_STATE.maxScale)
+  );
+  applyImageViewerTransform();
+}
+
+function zoomImageAtPoint(factor, clientX, clientY) {
+  var viewport = document.getElementById('imageViewerViewport');
+  if (!viewport) return;
+
+  var oldScale = IMAGE_VIEWER_STATE.scale;
+  var nextScale = Math.max(
+    IMAGE_VIEWER_STATE.minScale,
+    Math.min(oldScale * factor, IMAGE_VIEWER_STATE.maxScale)
+  );
+
+  if (nextScale === oldScale) return;
+
+  var rect = viewport.getBoundingClientRect();
+  var pointerX = clientX - rect.left - rect.width / 2;
+  var pointerY = clientY - rect.top - rect.height / 2;
+  var ratio = nextScale / oldScale;
+
+  IMAGE_VIEWER_STATE.x =
+    pointerX - (pointerX - IMAGE_VIEWER_STATE.x) * ratio;
+  IMAGE_VIEWER_STATE.y =
+    pointerY - (pointerY - IMAGE_VIEWER_STATE.y) * ratio;
+  IMAGE_VIEWER_STATE.scale = nextScale;
+
+  applyImageViewerTransform();
+}
+
+function applyImageViewerTransform() {
+  var stage =
+    document.getElementById(
+      'imageViewerStage'
+    );
+
+  var label =
+    document.getElementById(
+      'imageZoomLabel'
+    );
+
+  if (stage) {
+    stage.style.transform =
+      'translate3d(' +
+      Number(
+        IMAGE_VIEWER_STATE.x || 0
+      ) +
+      'px,' +
+      Number(
+        IMAGE_VIEWER_STATE.y || 0
+      ) +
+      'px,0) ' +
+      'scale(' +
+      Number(
+        IMAGE_VIEWER_STATE.scale || 1
+      ) +
+      ')';
+  }
+
+  if (label) {
+    label.textContent =
+      Math.round(
+        Number(
+          IMAGE_VIEWER_STATE.scale || 1
+        ) * 100
+      ) + '%';
+  }
+}
+
+function useSuggestion(text) {
+  var input = document.getElementById('questionInput');
+  input.value = text;
+  resizeComposer();
+  input.focus();
+}
+
+function hideWelcome() {
+  var welcome = document.getElementById('welcomeCard');
+  if (welcome) welcome.style.display = 'none';
+}
+
+function setComposerDisabled(disabled) {
+  document.getElementById('questionInput').disabled = disabled;
+  document.getElementById('sendBtn').disabled = disabled;
+}
+
+function resizeComposer() {
+  var input = document.getElementById('questionInput');
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 130) + 'px';
+}
+
+function scrollChatToBottom() {
+  var wrap = document.getElementById('chatMessages');
+  window.requestAnimationFrame(function() {
+    wrap.scrollTop = wrap.scrollHeight;
+  });
+}
+
+function isSafeHttpsUrl(value) {
+  return /^https:\/\//i.test(String(value || '').trim());
+}
+
+function hasText(value) {
+  return String(value || '').trim() !== '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var input = document.getElementById('questionInput');
+
+  input.addEventListener('input', resizeComposer);
+  input.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendQuestion();
+    }
+  });
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') closeImageModal();
+  });
+
+  initializeZoomableImageViewer();
+  resizeComposer();
+  input.focus();
+});
+</script>
